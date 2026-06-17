@@ -1,0 +1,9 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+qdrant_data/
+.git/
+*.docx
+FO-MAX-data-sample-2.0.xlsx
