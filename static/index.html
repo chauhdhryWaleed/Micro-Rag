@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Micro RAG</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            navy: { 900: '#0f2444', 800: '#1e3a5f', 700: '#264d7e' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .fade-in { animation: fadeIn 0.25s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .spinner { border: 2px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; width: 20px; height: 20px; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+
+  <!-- Header -->
+  <header class="bg-navy-900 text-white px-6 py-4 flex items-center justify-between shadow-lg">
+    <div>
+      <span class="text-lg font-semibold tracking-wide">Micro RAG</span>
+      <span class="ml-3 text-slate-400 text-sm">Validated family office dataset · RAG-powered search</span>
+    </div>
+    <div id="health-badge" class="text-xs px-2 py-1 rounded bg-slate-700 text-slate-300">Connecting...</div>
+  </header>
+
+  <!-- Main -->
+  <main class="max-w-4xl mx-auto px-4 py-10">
+
+    <!-- Hero -->
+    <div class="text-center mb-10">
+      <h1 class="text-3xl font-bold text-navy-900 mb-2">Micro RAG</h1>
+      <p class="text-slate-500 text-sm max-w-xl mx-auto">Ask any question about 50 validated global family offices. The AI retrieves the most relevant records and generates a grounded answer.</p>
+    </div>
+
+    <!-- Search bar -->
+    <div class="flex gap-2 mb-10">
+      <input id="query-input" type="text"
+        placeholder="e.g. Which family offices recently invested in fintech?"
+        class="flex-1 border border-slate-300 rounded-xl px-5 py-3.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        onkeydown="if(event.key==='Enter') runQuery()" />
+      <button onclick="runQuery()"
+        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3.5 rounded-xl text-sm font-semibold shadow-sm transition-colors">
+        Ask
+      </button>
+    </div>
+
+    <!-- Example queries -->
+    <div class="mb-10">
+      <p class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">Try an example</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+        <button onclick="setQuery('Which multi-family offices in the United States focus on technology investments?')"
+          class="example-card text-left">
+          <div class="flex items-start gap-3">
+            <span class="text-xl">🌐</span>
+            <div>
+              <p class="font-semibold text-slate-800 text-sm mb-0.5">US Tech-Focused MFOs</p>
+              <p class="text-xs text-slate-500">Find multi-family offices in the US with a technology investment mandate</p>
+            </div>
+          </div>
+        </button>
+
+        <button onclick="setQuery('Which family offices recently made an investment in healthcare or biotech?')"
+          class="example-card text-left">
+          <div class="flex items-start gap-3">
+            <span class="text-xl">🏥</span>
+            <div>
+              <p class="font-semibold text-slate-800 text-sm mb-0.5">Recent Healthcare Deals</p>
+              <p class="text-xs text-slate-500">Surface recent investments in healthcare, biotech, and life sciences</p>
+            </div>
+          </div>
+        </button>
+
+        <button onclick="setQuery('Which family offices have an impact investing or ESG mandate?')"
+          class="example-card text-left">
+          <div class="flex items-start gap-3">
+            <span class="text-xl">🌱</span>
+            <div>
+              <p class="font-semibold text-slate-800 text-sm mb-0.5">Impact & ESG Mandates</p>
+              <p class="text-xs text-slate-500">Identify offices focused on sustainability, impact, or ESG criteria</p>
+            </div>
+          </div>
+        </button>
+
+        <button onclick="setQuery('Tell me about Stonehage Fleming — their mandate, AUM, and recent activity')"
+          class="example-card text-left">
+          <div class="flex items-start gap-3">
+            <span class="text-xl">🔍</span>
+            <div>
+              <p class="font-semibold text-slate-800 text-sm mb-0.5">Deep Dive: Stonehage Fleming</p>
+              <p class="text-xs text-slate-500">Get a detailed profile including mandate, AUM, and recent news</p>
+            </div>
+          </div>
+        </button>
+
+      </div>
+    </div>
+    <style>
+      .example-card {
+        @apply bg-white border border-slate-200 rounded-xl p-4 shadow-sm
+               hover:border-blue-400 hover:shadow-md transition-all cursor-pointer;
+      }
+    </style>
+
+    <!-- Loading -->
+    <div id="loading" class="hidden flex items-center gap-3 text-slate-500 text-sm py-4">
+      <div class="spinner"></div>
+      <span>Retrieving records and generating answer...</span>
+    </div>
+
+    <!-- Error -->
+    <div id="error-box" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4"></div>
+
+    <!-- Results -->
+    <div id="results-container"></div>
+  </main>
+
+  <script>
+    function setQuery(q) {
+      document.getElementById('query-input').value = q;
+      runQuery();
+    }
+
+    async function runQuery() {
+      const query = document.getElementById('query-input').value.trim();
+      if (!query) return;
+
+      setLoading(true);
+      clearResults();
+      hideError();
+
+      try {
+        const res = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: query }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Request failed');
+        setLoading(false);
+        renderResults(data);
+      } catch (e) {
+        setLoading(false);
+        showError(e.message);
+      }
+    }
+
+    function renderResults(data) {
+      const container = document.getElementById('results-container');
+
+      // Filter tags
+      const filters = data.filters_applied || {};
+      const filterTags = Object.entries(filters)
+        .map(([k, v]) => `<span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-xs">${k.replace(/_/g,' ')}: ${v}</span>`)
+        .join('');
+      const fallback = data.fallback_used
+        ? `<span class="text-amber-600 text-xs ml-2">⚠ No results with filters — showing best semantic matches</span>` : '';
+
+      let html = `<div class="mb-5 flex flex-wrap items-center gap-2">
+        <span class="text-sm text-slate-500">${data.record_count ?? 0} record(s) retrieved</span>
+        ${filterTags}${fallback}
+      </div>`;
+
+      // AI answer block
+      if (data.answer) {
+        html += `<div class="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6 fade-in">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs">AI</span>
+            <span class="text-xs font-semibold text-blue-700 uppercase tracking-wide">AI Answer · grounded in dataset</span>
+          </div>
+          <p class="text-slate-800 text-sm leading-relaxed whitespace-pre-wrap">${escHtml(data.answer)}</p>
+          ${data.sources?.length ? `<div class="mt-4 pt-3 border-t border-blue-200">
+            <p class="text-xs text-blue-600 font-medium mb-2">Sources used:</p>
+            <div class="flex flex-wrap gap-2">
+              ${data.sources.map(s => `
+                <div class="bg-white border border-blue-100 rounded-lg px-3 py-1.5 text-xs">
+                  <span class="font-medium text-slate-700">${escHtml(s.fo_name || '?')}</span>
+                  <span class="ml-1 ${statusColor(s.validation_status)}">${s.validation_status || ''}</span>
+                  ${s.confidence_score ? `<span class="ml-1 text-slate-400">· ${s.confidence_score}/10</span>` : ''}
+                </div>`).join('')}
+            </div>
+          </div>` : ''}
+        </div>`;
+      }
+
+      // Source record cards
+      if (data.records?.length) {
+        html += `<p class="text-xs text-slate-400 uppercase tracking-wide font-medium mb-3">Source Records</p>`;
+        html += data.records.map(r => recordCard(r)).join('');
+      }
+
+      container.innerHTML = html;
+    }
+
+    function recordCard(r) {
+      return `<div class="bg-white border border-slate-200 rounded-xl p-5 mb-4 shadow-sm fade-in hover:shadow-md transition-shadow">
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <h2 class="font-semibold text-navy-900 text-base leading-tight">${escHtml(r.fo_name || 'Unknown')}</h2>
+            <p class="text-slate-500 text-xs mt-0.5">
+              ${[r.fo_type, r.hq_city, r.hq_country].filter(Boolean).join(' · ')}
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor(r.validation_status)}">${r.validation_status || 'unknown'}</span>
+            ${r.confidence_score ? `<span class="text-xs px-2 py-0.5 rounded-full ${confColor(r.confidence_score)} font-semibold">${r.confidence_score}/10</span>` : ''}
+          </div>
+        </div>
+
+        ${r.description ? `<p class="text-sm text-slate-700 mb-3 leading-relaxed line-clamp-3">${escHtml(r.description)}</p>` : ''}
+
+        <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600 mb-3">
+          ${field(r, 'aum_estimate', 'AUM')}
+          ${field(r, 'founding_year', 'Founded')}
+          ${field(r, 'asset_classes', 'Asset Classes')}
+          ${field(r, 'geographic_focus', 'Geography')}
+          ${field(r, 'investment_mandate', 'Mandate')}
+          ${field(r, 'principal_full_name', 'Principal')}
+          ${field(r, 'principal_title', 'Title')}
+          ${field(r, 'principal_email', 'Email')}
+        </div>
+
+        ${r.recent_news_headline || r.recent_investment_1 ? `
+        <div class="border-t border-slate-100 pt-3 mt-1 text-xs text-slate-500">
+          ${r.recent_news_headline ? `<p class="mb-1"><span class="font-medium text-slate-600">Recent:</span> ${escHtml(r.recent_news_headline)}</p>` : ''}
+          ${r.recent_investment_1 ? `<p><span class="font-medium text-slate-600">Investment:</span> ${escHtml(r.recent_investment_1)}</p>` : ''}
+        </div>` : ''}
+
+        ${r.website_url ? `<div class="mt-3 pt-2 border-t border-slate-100">
+          <a href="${escAttr(r.website_url)}" target="_blank" rel="noopener"
+            class="text-xs text-blue-600 hover:underline">${escHtml(r.website_url)}</a>
+        </div>` : ''}
+      </div>`;
+    }
+
+    function field(r, key, label) {
+      const v = r[key];
+      if (!v || String(v).trim() === '' || v === 'null') return '';
+      return `<div><span class="text-slate-400">${label}:</span> ${escHtml(String(v))}</div>`;
+    }
+
+    function statusColor(s) {
+      if (s === 'validated') return 'text-emerald-700 border-emerald-200 bg-emerald-50';
+      if (s === 'partial') return 'text-amber-700 border-amber-200 bg-amber-50';
+      return 'text-slate-500 border-slate-200 bg-slate-50';
+    }
+
+    function confColor(score) {
+      if (score >= 7) return 'bg-emerald-100 text-emerald-800';
+      if (score >= 5) return 'bg-amber-100 text-amber-800';
+      return 'bg-red-100 text-red-700';
+    }
+
+    function escHtml(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function escAttr(s) { return escHtml(s); }
+
+    function setLoading(on) {
+      document.getElementById('loading').classList.toggle('hidden', !on);
+    }
+    function clearResults() { document.getElementById('results-container').innerHTML = ''; }
+    function showError(msg) {
+      const b = document.getElementById('error-box');
+      b.textContent = msg;
+      b.classList.remove('hidden');
+    }
+    function hideError() { document.getElementById('error-box').classList.add('hidden'); }
+
+    async function checkHealth() {
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        const badge = document.getElementById('health-badge');
+        if (data.status === 'ok') {
+          badge.textContent = `${data.indexed_records} records indexed`;
+          badge.className = 'text-xs px-2 py-1 rounded bg-emerald-700 text-white';
+        } else {
+          badge.textContent = data.error || 'Degraded';
+          badge.className = 'text-xs px-2 py-1 rounded bg-amber-600 text-white';
+        }
+      } catch(e) {
+        document.getElementById('health-badge').textContent = 'Offline';
+      }
+    }
+
+    checkHealth();
+    document.getElementById('query-input').focus();
+  </script>
+</body>
+</html>
